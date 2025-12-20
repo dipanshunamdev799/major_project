@@ -96,24 +96,26 @@ query_engine = index.as_query_engine(
 )
 
 # Define a list of queries, Different kinds of queries to see the effectiveness of in EV sector
-queries = [
-    "How to invest in the EV sector? Summarize the most important financial trends in the EV Sector.",
-    # "What are the recent financial sentiments about renewable energy investments?",
-    # "Summarize the financial outlook for the technology sector in 2024.",
-    # "What are the key financial risks in the automotive industry this year?",
-    # "Provide insights on the financial performance of AI startups in the US."
-]
+# Define a list of queries, Different kinds of queries to see the effectiveness of in EV sector
+if __name__ == "__main__":
+    queries = [
+        "How to invest in the EV sector? Summarize the most important financial trends in the EV Sector.",
+        # "What are the recent financial sentiments about renewable energy investments?",
+        # "Summarize the financial outlook for the technology sector in 2024.",
+        # "What are the key financial risks in the automotive industry this year?",
+        # "Provide insights on the financial performance of AI startups in the US."
+    ]
 
-# Execute the queries and generate reports
-results = query_and_generate_reports(queries)
+    # Execute the queries and generate reports
+    results = query_and_generate_reports(queries)
 
-# Save the reports to a file
-output_file = "financial_sentiment_reports.txt"
-save_reports_to_file(results, output_file)
+    # Save the reports to a file
+    output_file = "financial_sentiment_reports.txt"
+    save_reports_to_file(results, output_file)
 
-# Print a summary of the generated reports
-for result in results:
-    print(f"Query: {result['query']}")
-    print(f"Generated Report:\n{result['report']}")
-    print("-" * 80)
+    # Print a summary of the generated reports
+    for result in results:
+        print(f"Query: {result['query']}")
+        print(f"Generated Report:\n{result['report']}")
+        print("-" * 80)
 
