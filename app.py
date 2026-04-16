@@ -44,7 +44,7 @@ h1, h2, h3 {
 /* Hide default hamburger menu and footer for professionalism */
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
-header {visibility: hidden;}
+header {background: transparent !important;}
 
 /* Sleek Chat Boundaries */
 .stChatMessage {
@@ -174,7 +174,7 @@ else:
     expand_graph = st.toggle("Expand Knowledge Graph", value=True, help="If enabled, it will search the web and add new entities to the knowledge graph. If disabled, answers will be based only on existing knowledge.")
     query_input = st.chat_input("Ask a financial question... (e.g. 'What is the EV sector outlook?')")
 
-    col1, col2 = st.columns([3, 2], gap="large")
+    col1, col2 = st.columns([1, 1], gap="large")
 
     with col1:
         st.subheader("Analysis Flow")
