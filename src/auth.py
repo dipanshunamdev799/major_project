@@ -78,3 +78,23 @@ def sign_in_with_google_id_token(id_token: str) -> dict:
         "localId": user_info.get("localId"),
         "provider": "google",
     }
+
+def send_password_reset_email(email: str) -> dict:
+    """Send a password reset email using Firebase REST API."""
+    if not FIREBASE_API_KEY:
+        return {"error": "Missing Firebase API Key"}
+
+    url = f"https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key={FIREBASE_API_KEY}"
+    payload = {
+        "requestType": "PASSWORD_RESET",
+        "email": email
+    }
+    
+    try:
+        res = requests.post(url, json=payload, timeout=15)
+        data = res.json()
+        if "error" in data:
+            return {"error": data["error"].get("message", "Failed to send reset email")}
+        return {"success": True}
+    except Exception as e:
+        return {"error": str(e)}

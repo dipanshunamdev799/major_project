@@ -55,8 +55,9 @@ def extract_entities(text: str) -> list:
     Return JSON format:
     {
       "entities": [{"name": "string", "type": "Company|Sector|Indicator|Event", "description": "string"}],
-      "relationships": [{"source": "Entity1", "target": "Entity2", "type": "OPERATES_IN|REPORTED|AFFECTS|CORRELATED_WITH", "description": "string"}]
+      "relationships": [{"source": "Entity1", "target": "Entity2", "type": "OPERATES_IN|REPORTED|AFFECTS|CORRELATED_WITH", "period": "string", "description": "string"}]
     }
+    For 'period', extract the timeframe if mentioned (e.g. '2024', 'Q1 2023', 'Oct 2022'). If none, use 'Current'.
     Only return valid JSON, no markdown formatting blocks.
     """
     response = call_groq(system_prompt, text, temperature=0.0, max_tokens=2000)

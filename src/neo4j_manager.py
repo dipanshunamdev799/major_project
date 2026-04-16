@@ -30,20 +30,7 @@ class Neo4jManager:
             print(f"Neo4j Connection Error: {e}")
             self.driver = None
 
-    def _run_with_retry(self, work, retries: int = 3):
-        if not self.driver:
-            return None
-        last_error = None
-        for attempt in range(retries):
-            try:
-                with self.driver.session() as session:
-                    return work(session)
-            except Exception as e:
-                last_error = e
-                if attempt < retries - 1:
-                    time.sleep(0.4 * (attempt + 1))
-        print(f"Neo4j operation error: {last_error}")
-        return None
+
 
     def _create_constraints(self):
         if not self.driver:
@@ -68,7 +55,11 @@ class Neo4jManager:
                 """
             )
 
-        self._run_with_retry(work)
+        try:
+            with self.driver.session() as session:
+                session.execute_write(work)
+        except Exception as e:
+            print(f"Neo4j constrain execution error: {e}")
 
     @staticmethod
     def _canonicalize_name(name: str) -> str:
@@ -146,6 +137,7 @@ class Neo4jManager:
                     "source_name": source_name,
                     "target_name": target_name,
                     "type": self._sanitize_relationship_type(rel.get("type", "RELATED_TO")),
+                    "period": str(rel.get("period", "Current")).strip(),
                     "description": str(rel.get("description", "")).strip(),
                 }
             )
@@ -203,7 +195,7 @@ class Neo4jManager:
                     f"""
                     MATCH (a:Entity {{key: $source_key}})
                     MATCH (b:Entity {{key: $target_key}})
-                    MERGE (a)-[r:{rel["type"]}]->(b)
+                    MERGE (a)-[r:{rel["type"]} {{period: $period}}]->(b)
                     ON CREATE SET r.first_seen_at = datetime(), r.evidence_count = 1
                     SET r.updated_at = datetime(),
                         r.source_urls = CASE
@@ -223,7 +215,15 @@ class Neo4jManager:
                 )
             return True
 
-        return bool(self._run_with_retry(work))
+        if not self.driver:
+            return False
+            
+        try:
+            with self.driver.session() as session:
+                return session.execute_write(work)
+        except Exception as e:
+            print(f"Neo4j write error: {e}")
+            return False
 
     def retrieve_relevant_subgraph(self, query_text: str, limit: int = 8) -> list[dict[str, Any]]:
         if not self.driver:
@@ -246,6 +246,7 @@ class Neo4jManager:
                         a.description AS source_description,
                         a.embedding AS source_embedding,
                         type(r) AS relation_type,
+                        r.period AS relation_period,
                         r.description AS relation_description,
                         coalesce(r.evidence_count, 0) AS evidence_count,
                         b.key AS target_key,
@@ -257,7 +258,12 @@ class Neo4jManager:
                 )
             )
 
-        rows = self._run_with_retry(work) or []
+        try:
+            with self.driver.session() as session:
+                rows = session.execute_read(work) or []
+        except Exception as e:
+            print(f"Neo4j read error: {e}")
+            rows = []
         scored_rows = []
 
         for row in rows:
@@ -301,10 +307,11 @@ class Neo4jManager:
             source_description = row.get("source_description") or "No description."
             target_name = row.get("target_name")
             relation_type = row.get("relation_type")
+            relation_period = row.get("relation_period") or "Current"
             relation_description = row.get("relation_description") or ""
             if target_name and relation_type:
                 context_lines.append(
-                    f"{source_name} ({source_type}) {relation_type} {target_name}. "
+                    f"[{relation_period}] {source_name} ({source_type}) {relation_type} {target_name}. "
                     f"Entity context: {source_description}. Relationship detail: {relation_description}".strip()
                 )
             else:
@@ -329,6 +336,7 @@ class Neo4jManager:
                         n.name AS source_name,
                         n.type AS source_type,
                         type(r) AS rel_type,
+                        r.period AS rel_period,
                         coalesce(r.evidence_count, 0) AS evidence_count,
                         m.key AS target_key,
                         m.name AS target_name,
@@ -339,7 +347,12 @@ class Neo4jManager:
                 )
             )
 
-        result = self._run_with_retry(work) or []
+        try:
+            with self.driver.session() as session:
+                result = session.execute_read(work) or []
+        except Exception as e:
+            print(f"Neo4j get_graph_data error: {e}")
+            result = []
         for record in result:
             src_key = record["source_key"]
             src_name = record["source_name"]
@@ -349,6 +362,8 @@ class Neo4jManager:
             target_type = record["target_type"] or "Entity"
             rel_type = record["rel_type"]
             evidence_count = record["evidence_count"]
+
+            rel_period = record.get("rel_period") or "Current"
 
             if src_key and src_key not in seen_nodes:
                 nodes.append({"id": src_key, "label": src_name, "group": src_type})
@@ -361,7 +376,7 @@ class Neo4jManager:
                     {
                         "source": src_key,
                         "target": target_key,
-                        "label": f"{rel_type} ({evidence_count})" if evidence_count else rel_type,
+                        "label": f"[{rel_period}] {rel_type} ({evidence_count})" if evidence_count else f"[{rel_period}] {rel_type}",
                     }
                 )
         return nodes, edges

@@ -7,7 +7,7 @@ import pandas as pd
 from streamlit_agraph import agraph, Node, Edge, Config
 
 from core import process_query
-from src.auth import sign_in_with_email_password, sign_in_with_google_id_token, sign_up_with_email_password
+from src.auth import sign_in_with_email_password, sign_in_with_google_id_token, sign_up_with_email_password, send_password_reset_email
 from src.neo4j_manager import neo4j_manager
 
 # --- Page Config ---
@@ -105,6 +105,13 @@ header {background: transparent !important;}
     color: #00FF88;
 }
 
+/* Sticky Container for Graph */
+.sticky-graph {
+    position: sticky;
+    top: 3rem;
+    z-index: 10;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -126,25 +133,45 @@ with st.sidebar:
         st.subheader("Authentication")
         auth_mode = st.radio("Mode", ["Email/Password", "Google Token"], horizontal=True)
         if auth_mode == "Email/Password":
-            auth_action = st.radio("Action", ["Sign In", "Sign Up"], horizontal=True)
+            auth_action = st.radio("Action", ["Sign In", "Sign Up", "Reset Password"], horizontal=True)
             email = st.text_input("Email")
-            password = st.text_input("Password", type="password")
-            button_label = "Create Account" if auth_action == "Sign Up" else "Sign In"
+            
+            if auth_action != "Reset Password":
+                password = st.text_input("Password", type="password")
+            
+            if auth_action == "Sign Up":
+                button_label = "Create Account"
+            elif auth_action == "Reset Password":
+                button_label = "Send Reset Link"
+            else:
+                button_label = "Sign In"
+                
             if st.button(button_label):
-                if email and password:
-                    with st.spinner("Working with Firebase..."):
-                        if auth_action == "Sign Up":
-                            res = sign_up_with_email_password(email, password)
-                        else:
-                            res = sign_in_with_email_password(email, password)
-                        if "error" in res:
-                            st.error(f"Error: {res['error']}")
-                        else:
-                            st.session_state['authenticated'] = True
-                            st.session_state['user'] = res.get('email') or email
-                            st.rerun()
+                if auth_action == "Reset Password":
+                    if email:
+                        with st.spinner("Sending reset email..."):
+                            res = send_password_reset_email(email)
+                            if "error" in res:
+                                st.error(f"Error: {res['error']}")
+                            else:
+                                st.success("Password reset email sent! Check your inbox.")
+                    else:
+                        st.warning("Please enter your email address.")
                 else:
-                    st.warning("Provide both email and password")
+                    if email and password:
+                        with st.spinner("Working with Firebase..."):
+                            if auth_action == "Sign Up":
+                                res = sign_up_with_email_password(email, password)
+                            else:
+                                res = sign_in_with_email_password(email, password)
+                            if "error" in res:
+                                st.error(f"Error: {res['error']}")
+                            else:
+                                st.session_state['authenticated'] = True
+                                st.session_state['user'] = res.get('email') or email
+                                st.rerun()
+                    else:
+                        st.warning("Provide both email and password")
         else:
             st.caption("Use the Firebase JS frontend to sign in with Google, then paste the returned Firebase ID token here.")
             google_token = st.text_area("Firebase ID token", height=140)
@@ -245,6 +272,7 @@ else:
                 st.rerun()
 
     with col2:
+        st.markdown('<div class="sticky-graph">', unsafe_allow_html=True)
         st.subheader("Live Knowledge Graph")
         st.caption("The graph expands with each finance query and shows the strongest discovered market relationships.")
 
@@ -257,7 +285,31 @@ else:
             st.markdown('</div>', unsafe_allow_html=True)
 
         if nodes_data:
-            nodes = [Node(id=n["id"], label=n["label"], size=22, shape="dot") for n in nodes_data]
+            import networkx as nx
+            from networkx.algorithms.community import louvain_communities
+            
+            # Map into networkx for Louvain
+            G = nx.Graph()
+            for n in nodes_data:
+                G.add_node(n["id"])
+            for e in edges_data:
+                G.add_edge(e["source"], e["target"])
+                
+            try:
+                communities = louvain_communities(G)
+                cluster_map = {}
+                for i, cluster in enumerate(communities):
+                    for node in cluster:
+                        cluster_map[node] = str(i)
+                        
+                for n in nodes_data:
+                    # Update group to the community ID to color-code it
+                    # Overriding the default 'type' group
+                    n["group"] = cluster_map.get(n["id"], "0")
+            except Exception as e:
+                print(f"Louvain clustering error: {e}")
+
+            nodes = [Node(id=n["id"], label=n["label"], group=n.get("group", "0"), size=22, shape="dot") for n in nodes_data]
             edges = [Edge(source=e["source"], target=e["target"], label=e["label"]) for e in edges_data]
 
             config = Config(
@@ -276,3 +328,5 @@ else:
             agraph(nodes=nodes, edges=edges, config=config)
         else:
             st.info("The knowledge graph is currently empty. Ask a finance question to start growing it.")
+            
+        st.markdown('</div>', unsafe_allow_html=True)
