@@ -15,13 +15,15 @@ def _strip_code_fences(payload: str) -> str:
         cleaned = cleaned[:-3]
     return cleaned.strip()
 
-def call_groq(system_prompt: str, user_prompt: str, temperature: float = 0.2, max_tokens: int = 1000) -> str:
+def call_groq(system_prompt: str, user_prompt: str, temperature: float = 0.2, max_tokens: int = 1000, model: str = None) -> str:
     """Wrapper to make calls to Groq API."""
     if not client:
         return ""
+        
+    target_model = model if model else GROQ_MODEL
     try:
         completion = client.chat.completions.create(
-            model=GROQ_MODEL,
+            model=target_model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
@@ -31,7 +33,23 @@ def call_groq(system_prompt: str, user_prompt: str, temperature: float = 0.2, ma
         )
         return completion.choices[0].message.content
     except Exception as e:
-        print(f"Groq API Error: {e}")
+        print(f"Groq API Error with {target_model}: {e}")
+        if target_model == GROQ_MODEL:
+            print("Attempting fallback with openai/gpt-oss-120b...")
+            try:
+                fallback_completion = client.chat.completions.create(
+                    model="openai/gpt-oss-120b",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                return fallback_completion.choices[0].message.content
+            except Exception as fallback_e:
+                print(f"Fallback API Error: {fallback_e}")
+                return ""
         return ""
 
 def is_finance_related(query: str) -> bool:
@@ -54,7 +72,7 @@ def extract_entities(text: str) -> list:
     Extract financial entities and relationships from the text.
     Return JSON format:
     {
-      "entities": [{"name": "string", "type": "Company|Sector|Indicator|Event", "description": "string"}],
+      "entities": [{"name": "string", "type": "Company|Sector|Indicator|Event|Metric", "description": "string (if Metric, explicitly include the actual numerical value and unit, e.g. 'PAT grew by 6% to 1000 Cr')"}],
       "relationships": [{"source": "Entity1", "target": "Entity2", "type": "OPERATES_IN|REPORTED|AFFECTS|CORRELATED_WITH", "period": "string", "description": "string"}]
     }
     For 'period', extract the timeframe if mentioned (e.g. '2024', 'Q1 2023', 'Oct 2022'). If none, use 'Current'.

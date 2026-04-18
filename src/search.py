@@ -1,3 +1,4 @@
+import concurrent.futures
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
@@ -41,13 +42,13 @@ def search_financial_news(query: str, num_results: int = 5) -> list:
                 if any(allowed in domain for allowed in ALLOWED_DOMAINS):
                     filtered_items.append(item)
             return filtered_items
-        print(f"Google API Error: {response.status_code}")
+        print(f"Google API Error: {response.status_code} | {response.text}")
         return []
     except Exception as e:
         print(f"Search error: {e}")
         return []
 
-def fetch_article_content(url: str) -> str:
+def fetch_article_content(url: str, session: requests.Session = None) -> str:
     """Fetches the full text content of an article."""
     headers = {
         "User-Agent": (
@@ -63,11 +64,13 @@ def fetch_article_content(url: str) -> str:
         return ""
         
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        req_func = session.get if session else requests.get
+        response = req_func(url, headers=headers, timeout=10)
         if response.status_code == 200:
-            soup = BeautifulSoup(response.text, "html.parser")
-            paragraphs = soup.find_all("p")
-            text = "\n".join([p.get_text(" ", strip=True) for p in paragraphs if p.get_text(strip=True)])
+            soup = BeautifulSoup(response.text, "lxml")
+            for junk in soup(["script", "style", "header", "footer", "nav", "aside"]):
+                junk.extract()
+            text = soup.get_text(separator="\n", strip=True)
             return text.strip()
     except Exception as e:
         print(f"Fetch error for {url}: {e}")
@@ -79,22 +82,43 @@ def search_and_extract(query: str) -> list:
     extracted_data = []
     seen_urls = set()
 
+    # Pre-filter URLs
+    urls_to_process = []
     for res in results:
         url = res.get("link")
         title = res.get("title", "")
-        if not url or url in seen_urls:
-            continue
-        seen_urls.add(url)
-        content = fetch_article_content(url)
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            urls_to_process.append((url, title))
 
+    if not urls_to_process:
+        return extracted_data
+
+    # Process task for ThreadPoolExecutor
+    def process_task(item, session):
+        url, title = item
+        content = fetch_article_content(url, session)
         if content and len(content) > 200:
-            truncated_content = content[:4000]
+            truncated_content = content[:15000]
             entities_rel = extract_entities(truncated_content)
-            extracted_data.append({
+            return {
                 "url": url,
                 "title": title,
                 "content": content,
                 "graph_data": entities_rel
-            })
+            }
+        return None
+
+    # Use ThreadPoolExecutor to fetch and process in parallel
+    with requests.Session() as session:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(process_task, item, session) for item in urls_to_process]
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    result = future.result()
+                    if result:
+                        extracted_data.append(result)
+                except Exception as e:
+                    print(f"Error processing URL: {e}")
             
     return extracted_data

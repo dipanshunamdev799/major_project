@@ -1,5 +1,21 @@
 import yfinance as yf
 import pandas as pd
+import os
+import sys
+import contextlib
+
+@contextlib.contextmanager
+def suppress_output():
+    with open(os.devnull, 'w') as devnull:
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
+        sys.stdout = devnull
+        sys.stderr = devnull
+        try:
+            yield
+        finally:
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
 
 COMMON_TICKER_MAP = {
     "reliance": "RELIANCE.NS",
@@ -27,7 +43,14 @@ def search_ticker(query: str) -> str:
     for w in words:
         w_clean = w.strip("?,.!;:'\"")
         if w_clean.isupper() and 2 <= len(w_clean) <= 5 and w_clean not in exclude_indices:
-            return w_clean
+            with suppress_output():
+                try:
+                    if not yf.Ticker(w_clean).history(period="1d").empty:
+                        return w_clean
+                    if not yf.Ticker(f"{w_clean}.NS").history(period="1d").empty:
+                        return f"{w_clean}.NS"
+                except Exception:
+                    pass
 
     return ""
 

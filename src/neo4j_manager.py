@@ -225,6 +225,81 @@ class Neo4jManager:
             print(f"Neo4j write error: {e}")
             return False
 
+    def add_ticker_data(self, symbol: str, ticker_payload: dict) -> bool:
+        if not self.driver or not ticker_payload:
+            return False
+
+        info = ticker_payload.get("info", {})
+        daily = ticker_payload.get("daily_summary", {})
+        monthly = ticker_payload.get("monthly_summary", {})
+        yearly = ticker_payload.get("yearly_summary", {})
+        
+        long_name = info.get("longName") or symbol
+        description = info.get("longBusinessSummary", "")
+        sector = info.get("sector", "")
+        industry = info.get("industry", "")
+        
+        recent_close_prices = list(ticker_payload.get("history_60d", {}).values())
+        if len(recent_close_prices) > 10:
+            recent_close_prices = recent_close_prices[-10:]
+            
+        close_prices_str = f"Last 10 days close prices: {[round(float(p), 2) for p in recent_close_prices]}" if recent_close_prices else ""
+        
+        full_desc = f"{description}\n{close_prices_str}\n1Y Return: {yearly.get('1y_return', 0):.2f}%, 1M Return: {monthly.get('1m_return', 0):.2f}%"
+        
+        ticker_key = self._entity_key(symbol, "Ticker")
+        company_key = self._entity_key(long_name, "Company")
+        
+        def work(session):
+            session.run("""
+                MERGE (t:Entity {key: $t_key})
+                ON CREATE SET t.created_at = datetime(), t.name = $symbol, t.type = 'Ticker'
+                SET t.updated_at = datetime(),
+                    t:Ticker,
+                    t.sector = CASE WHEN $sector <> '' THEN $sector ELSE t.sector END,
+                    t.industry = CASE WHEN $industry <> '' THEN $industry ELSE t.industry END,
+                    t.latest_close = $latest_close,
+                    t.return_1y = $return_1y,
+                    t.previous_close = $prev_close
+            """, t_key=ticker_key, symbol=symbol, sector=sector, industry=industry, 
+                 latest_close=daily.get('latest_close'), return_1y=yearly.get('1y_return'),
+                 prev_close=info.get('previousClose'))
+            
+            session.run("""
+                MERGE (c:Entity {key: $c_key})
+                ON CREATE SET c.created_at = datetime(), c.name = $long_name, c.type = 'Company'
+                SET c.updated_at = datetime(),
+                    c:Company,
+                    c.description = $desc,
+                    c.embedding = CASE WHEN size($embedding) > 0 THEN $embedding ELSE c.embedding END
+            """, c_key=company_key, long_name=long_name, desc=full_desc, embedding=get_embedding(f"{long_name}. {full_desc}"))
+            
+            session.run("""
+                MATCH (c:Entity {key: $c_key})
+                MATCH (t:Entity {key: $t_key})
+                MERGE (c)-[r:TRADED_AS {period: 'Current'}]->(t)
+                SET r.updated_at = datetime(), r.evidence_count = coalesce(r.evidence_count, 0) + 1
+            """, c_key=company_key, t_key=ticker_key)
+            
+            if sector:
+                s_key = self._entity_key(sector, "Sector")
+                session.run("""
+                    MERGE (s:Entity {key: $s_key})
+                    ON CREATE SET s.name = $sector, s.type = 'Sector', s.created_at = datetime()
+                    SET s:Sector, s.updated_at = datetime()
+                    WITH s
+                    MATCH (c:Entity {key: $c_key})
+                    MERGE (c)-[:OPERATES_IN {period: 'Current'}]->(s)
+                """, s_key=s_key, sector=sector, c_key=company_key)
+
+        try:
+            with self.driver.session() as session:
+                session.execute_write(work)
+                return True
+        except Exception as e:
+            print(f"Neo4j market data write error: {e}")
+            return False
+
     def retrieve_relevant_subgraph(self, query_text: str, limit: int = 8) -> list[dict[str, Any]]:
         if not self.driver:
             return []

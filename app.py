@@ -214,6 +214,14 @@ else:
                     with st.expander("Sources"):
                         for s in msg["sources"]:
                             st.write(s)
+                if msg.get("kg_extraction_data"):
+                    with st.expander("Knowledge Graph Extraction"):
+                        for ext in msg["kg_extraction_data"]:
+                            st.markdown(f"**Source:** {ext.get('title', 'Unknown')} ([Link]({ext.get('url', '')}))")
+                            st.json({
+                                "Entities": ext.get("entities", []),
+                                "Relationships": ext.get("relationships", [])
+                            })
                 if msg.get("graph_results"):
                     with st.expander("Graph Matches"):
                         for row in msg["graph_results"]:
@@ -266,6 +274,7 @@ else:
                     "sources": result.get("sources", []),
                     "ticker_data": result.get("ticker_data"),
                     "graph_results": result.get("graph_results", []),
+                    "kg_extraction_data": result.get("kg_extraction_data", []),
                 }
 
                 st.session_state['chat_history'].append(response_obj)
